@@ -1,61 +1,22 @@
-"""仪器维修业务规则：状态流转、字段校验与筛选口径都收在这里。"""
+"""仪器维修业务规则：只声明本模块配置，流程复用 ModuleService。"""
 from __future__ import annotations
 
-from typing import Any
+from app.services.common import ModuleConfig, ModuleService
 
-from app.store import store
+CONFIG = ModuleConfig(
+    module="equipment_repair",
+    label="仪器维修",
+    entry_name="维修记录",
+    code_field="维修编号",
+    required_fields=["维修编号", "仪器编号", "故障描述"],
+    status_order=["已报修", "维修中", "已修复", "无法修复"],
+    action_rules={"派工维修": "维修中", "确认修复": "已修复", "标记报废": "无法修复"},
+    negative_actions=[],
+    list_doc="按维修编号与状态过滤仪器维修列表；没有数据时返回空页，不报错。",
+    detail_doc="读取单条维修记录明细；不存在时给出可读的错误说明。",
+    create_doc="登记一条维修记录，缺字段时说明原因而不是静默丢弃。",
+    action_doc="对单条维修记录执行派工维修、确认修复、标记报废；不允许的动作会被拦下并说明原因。",
+    export_doc="导出仪器维修清单：返回当前过滤条件下的全量数据。",
+)
 
-MODULE = "equipment_repair"
-REQUIRED_FIELDS = ["维修编号", "仪器编号", "故障描述"]
-STATUS_ORDER = ["已报修", "维修中", "已修复", "无法修复"]
-ACTION_RULES = {"派工维修": "维修中", "确认修复": "已修复", "标记报废": "无法修复"}
-NEGATIVE_ACTIONS = []
-
-
-class EquipmentRepairService:
-    def list_entries(
-        self,
-        *,
-        keyword: str | None = None,
-        status: str | None = None,
-        page: int = 1,
-        size: int = 20,
-    ) -> tuple[list[dict[str, Any]], int]:
-        rows = store.rows(MODULE)
-        if keyword:
-            rows = [row for row in rows if keyword in str(row.get("维修编号", ""))]
-        if status:
-            rows = [row for row in rows if row.get("status") == status]
-        total = len(rows)
-        start = max(page - 1, 0) * size
-        return rows[start:start + size], total
-
-    def get_entry(self, entry_id: int) -> dict[str, Any] | None:
-        return store.find(MODULE, entry_id)
-
-    def create_entry(self, values: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
-        missing = [field for field in REQUIRED_FIELDS if not str(values.get(field) or "").strip()]
-        if missing:
-            return None, missing
-        rows = store.rows(MODULE)
-        entry = {"id": max((int(row.get("id", 0)) for row in rows), default=0) + 1}
-        entry.update({field: values.get(field) for field in REQUIRED_FIELDS})
-        entry["status"] = STATUS_ORDER[0]
-        entry["pending"] = True
-        entry["abnormal"] = False
-        rows.append(entry)
-        return entry, []
-
-    def run_action(self, entry_id: int, action: str) -> tuple[dict[str, Any] | None, str]:
-        entry = store.find(MODULE, entry_id)
-        if entry is None:
-            return None, f"维修记录 {entry_id} 不存在或已归档"
-        if action not in ACTION_RULES:
-            return None, f"动作「{action}」不属于仪器维修可执行范围"
-        target = ACTION_RULES[action]
-        if target not in STATUS_ORDER:
-            return None, f"目标状态「{target}」不在允许的状态序列里"
-        entry["status"] = target
-        entry["pending"] = target != STATUS_ORDER[-1]
-        entry["abnormal"] = action in NEGATIVE_ACTIONS
-        return entry, f"维修记录已{action}"
+service = ModuleService(CONFIG)
